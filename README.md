@@ -1,10 +1,15 @@
-# LFI Vulnerability Scanner
+# LFI Vulnerability Scanner v2.0
 
 An automated bash script to test for Local File Inclusion (LFI) vulnerabilities with iterative bypass testing capabilities.
 
 ## Overview
 
 This scanner automates the process of testing web applications for LFI vulnerabilities by trying multiple bypass techniques and file targets. It progressively tests different attack vectors in four phases, from basic traversal to advanced PHP filter wrappers.
+
+New in v2.0:
+- Smart pattern detection: analyzes the current parameter value in the URL to detect directory prefixes and generate prefix-aware bypass payloads
+- Multiple basic traversal depths tested automatically
+- Clear final report including detected prefix and traversal depth
 
 ## Usage
 
@@ -19,13 +24,19 @@ This scanner automates the process of testing web applications for LFI vulnerabi
 
 The **second parameter (`<PARAMETER>`)** is the name of the GET parameter in the URL that you suspect might be vulnerable to LFI. This is typically a parameter that the application uses to include or load files.
 
-### Example
+### Examples
 
 ```bash
 ./lfi_scanner.sh "http://example.com/index.php" "language"
 ```
 
 This will test the URL: `http://example.com/index.php?language=[PAYLOAD]`
+
+You can also provide the URL with an existing value for the parameter to help pattern detection:
+
+```bash
+./lfi_scanner.sh "http://example.com/index.php?language=en" "language"
+```
 
 Common vulnerable parameter names include:
 - `file`
@@ -53,13 +64,13 @@ If basic LFI fails, it tries various filter bypass methods:
 
 | Technique | Description | Example Payload |
 |-----------|-------------|-----------------|
-| **Non-recursive** | Bypasses filters that remove `../` once | `....//....//....//etc/passwd` |
-| **Non-recursive alternative** | Another variant using mixed slashes | `..././..././..././etc/passwd` |
-| **URL encoded** | Single URL encoding | `%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd` |
-| **Double encoded** | Double URL encoding | `%252e%252e%252f%252e%252e%252fetc/passwd` |
+| **Non-recursive** | Bypasses filters that remove `../` once | `....//....//....//....//etc//passwd` |
+| **Non-recursive alternative** | Another variant using mixed slashes | `..././..././..././..././etc/passwd` |
+| **URL encoded** | Single URL encoding | `%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd` |
+| **Double encoded** | Double URL encoding | `%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fpasswd` |
 | **Approved path** | Prepends expected path | `./languages/../../../../etc/passwd` |
 | **Null byte** | Bypasses extension appending (PHP < 5.3) | `../../../../etc/passwd%00` |
-| **Extra slashes** | Mixed slash patterns | `..././..././..././etc/passwd` |
+| **Extra slashes** | Mixed slash patterns | `..././..././..././..././etc/passwd` |
 | **Deep traversal** | More directory levels | `../../../../../../../../../etc/passwd` |
 
 ### Phase 3: Alternative Target Files
@@ -113,6 +124,18 @@ The script provides a comprehensive final report including:
 - Working payload
 - Full exploit URL
 - Suggested next steps for further exploitation
+
+### Detected Pattern
+When a vulnerability is confirmed, the tool also reports any detected prefix and the traversal depth used by the working payload:
+
+```
+Detected Pattern:
+   Prefix: languages/
+   Traversal depth: 5
+```
+
+- Prefix: If your parameter already has a directory prefix (e.g., `languages/`), the scanner detects it and generates prefix-aware payloads.
+- Traversal depth: Counts occurrences of bypass segments like `..../` used in the final payload. The scanner calculates this automatically to help you tune payload length.
 
 ## Success Criteria
 

